@@ -31,6 +31,7 @@ import time
 import sys
 import urllib.parse
 import re
+import getpass
 
 #------------------------------------------------------------------------------
 # Logger class, used to log messages. A special method can be used to
@@ -287,11 +288,60 @@ def git_push():
     run_cmd('git push origin master')
 
 #------------------------------------------------------------------------------
+# EXPERIMENTAL. Do a sharelatex push.
+#------------------------------------------------------------------------------
+def sharelatex_push():
+    Logger().log(
+        'Pushing to sharelatex is an experimental feature. Use at your own risk.',
+        True, 'YELLOW')
+    email = input("sharelatex email: ")
+    password = getpass.getpass("sharelatex password: ")
+
+    from requests import session
+    import re
+
+    with session() as c:
+        # Grab CSRF token
+        response = c.get("https://www.sharelatex.com/login")
+        m  = re.search('window.csrfToken = "(.+?)"', response.text)
+        csrf = m.group(1)
+
+        # log in
+        payload = {
+            '_csrf': csrf,
+            'email': email,
+            'password': password
+        }
+
+        response = c.post('https://www.sharelatex.com/login', data=payload)
+        print(response)
+        response = c.get('https://www.sharelatex.com/project')
+        print(response)
+        m  = re.search('window.csrfToken = "(.+?)"', response.text)
+        csrf = m.group(1)
+
+
+        # upload files
+        file_path = "/home/fotanus/master_docs/thesis.zip"
+        size = os.stat(file_path).st_size
+
+        payload = {
+                '_csrf': csrf,
+                'qquuid': "b6331504-dd0b-4b59-b067-d5205501e93d",
+                'qqtotalfilesize': size
+        }
+        files = {'qqfile': open(file_path, "rb")}
+
+        response = c.post('https://www.sharelatex.com/project/new/upload', files=files, data=payload)
+        print(response)
+        print(response.text)
+
+#------------------------------------------------------------------------------
 # The body of the application. Determine the ids, make sure we're in a git
 # repository with all the right gitignore files, fetch the project files,
 # commit any changes and also push them if the user requested.
 #------------------------------------------------------------------------------
-def go(id, message, push, dont_commit):
+def go(id, message, push, sharelatex_push_flag, dont_commit):
     id = determine_id(id)
 
     ensure_git_repository_started()
@@ -310,6 +360,9 @@ def go(id, message, push, dont_commit):
                 git_push()
         else:
             Logger().log('No changes to commit.')
+
+    if sharelatex_push_flag:
+        sharelatex_push()
 
     write_saved_sharelatex_document(id)
     Logger().log('All done!')
@@ -345,6 +398,7 @@ def parse_input():
     "\t%prog                                                                                           [id from last invocation is used, nothing is added to commit message]")
     parser.add_option('-m', '--message', help='Commit message (default: "").', dest='message', type='string', default='')
     parser.add_option('-p', "--push", help="Push after doing commit (default: don't push) [EXPERIMENTAL]", dest='do_push', action='store_true',default=False)
+    parser.add_option('-P', "--push-to-sharelatex", help="Push to sharelatex (default: don't push) [EXPERIMENTAL]", dest='do_sharelatex_push', action='store_true',default=False)
     parser.add_option('-n', "--no-commit", help="Don't commit, just download new files.",dest='dont_commit', action='store_true', default=False)
 
     (options, args) = parser.parse_args()
@@ -356,7 +410,7 @@ def parse_input():
     else:
         id = None
 
-    return id, options.message, options.do_push, options.dont_commit
+    return id, options.message, options.do_push, options.do_sharelatex_push, options.dont_commit
 
 #------------------------------------------------------------------------------
 # Go, go, go!
